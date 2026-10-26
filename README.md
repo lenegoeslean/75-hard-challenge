@@ -27,4 +27,4 @@ Alle Einträge liegen nur auf dem Gerät (localStorage, Fotos in IndexedDB). Üb
 
 ## Updates
 
-Nach Änderungen an den Dateien in `sw.js` die Zeile `const CACHE = 'sh75-v1'` hochzählen (z. B. `sh75-v2`), damit das Handy sicher die neue Version lädt.
+Nach Änderungen an den Dateien in `sw.js` die Zeile `const CACHE = 'sh75-v2'` hochzählen (z. B. `sh75-v3`), damit das Handy sicher die neue Version lädt.

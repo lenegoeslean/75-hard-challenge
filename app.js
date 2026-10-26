@@ -6,7 +6,7 @@
    Konstanten
    ========================================================= */
 const LS_KEY = 'sh75-data-v1';
-const APP_VERSION = '1.0';
+const APP_VERSION = '1.1';
 
 const THEMES = {
   t1: { name: 'Olive & Bordeaux', light: '#CAD183', dark: '#66023C' },
@@ -17,11 +17,14 @@ const THEMES = {
 const INDOOR = ['Homeworkout', 'Gym', 'Hula Hoop', 'Zirkeltraining', 'Laufband', 'Crosstrainer', 'Cycling', 'Schwimmen', 'Incline Walk', 'Pilates', 'Reformer Pilates', 'Padel', 'Stretching', 'Yoga'];
 const OUTDOOR = ['Padel', 'Laufen', 'Schwimmen', 'Inline-Skaten', 'Spazieren', 'Radfahren', 'Zirkeltraining'];
 
+/* Tier pro Sportart */
 const WO_EMOJI = {
-  'Homeworkout': '🏠', 'Gym': '🏋️', 'Hula Hoop': '⭕', 'Zirkeltraining': '🔁', 'Laufband': '🏃', 'Crosstrainer': '⚙️',
-  'Cycling': '🚴', 'Schwimmen': '🏊', 'Incline Walk': '⛰️', 'Pilates': '🧘', 'Reformer Pilates': '🤸', 'Padel': '🎾',
-  'Stretching': '🙆', 'Yoga': '🪷', 'Laufen': '🏃‍♀️', 'Inline-Skaten': '🛼', 'Spazieren': '🚶‍♀️', 'Radfahren': '🚲'
+  'Schwimmen': '🦈', 'Spazieren': '🪿', 'Crosstrainer': '🐼', 'Incline Walk': '🐻', 'Laufen': '🦊', 'Laufband': '🐰',
+  'Homeworkout': '🐥', 'Padel': '🐺', 'Hula Hoop': '🐢', 'Inline-Skaten': '🦖', 'Reformer Pilates': '🫍', 'Zirkeltraining': '🦒',
+  'Gym': '🦓', 'Cycling': '🦔', 'Pilates': '🦩', 'Yoga': '🐈', 'Stretching': '🐙', 'Radfahren': '🐿️'
 };
+
+
 
 /* Sportarten, bei denen Distanz & Pace sinnvoll sind – und wie die Pace angezeigt wird */
 const DIST = {
@@ -217,10 +220,7 @@ function goalProgress(g, day) {
       const extra = Math.max(0, Math.min(c.total - a - b, t - inMin - outMin));
       frac = t ? (a + b + extra) / t : 0;
       auto = c.total >= t && c.inn >= inMin && c.out >= outMin;
-      const parts = [];
-      if (inMin) parts.push(`${Math.min(c.inn, inMin)}/${inMin} drinnen`);
-      if (outMin) parts.push(`${Math.min(c.out, outMin)}/${outMin} draußen`);
-      status = `${c.total} von ${t} Workouts` + (parts.length ? ' · ' + parts.join(' · ') : '');
+      status = `${c.total} von ${t} Workouts`;
       break;
     }
     case 'calories': {
@@ -450,6 +450,7 @@ function render() {
   }
   view.innerHTML = html;
   if (ui.sheetDate) renderSheet();
+  updateScrollLock();
   hydratePhotos();
 }
 
@@ -510,7 +511,7 @@ function goalBody(k, g, day) {
   const D = `data-date="${k}" data-goal="${g.id}"`;
   switch (g.type) {
     case 'steps':
-      return `<div class="input-unit"><input class="input" inputmode="numeric" enterkeyhint="done" placeholder="Schritte eintragen" data-ch="steps" ${D} value="${day.steps ? day.steps : ''}"><span>Schritte</span></div>`;
+      return `<div class="input-unit"><input class="input" inputmode="numeric" enterkeyhint="done" placeholder="Schritte eintragen" data-ch="steps" ${D} value="${day.steps ? fi(day.steps) : ''}"><span>Schritte</span></div>`;
     case 'water': {
       const v = day.water || 0;
       const n = Math.max(Math.ceil((g.target || 2000) / 250), Math.ceil(v / 250));
@@ -539,8 +540,11 @@ function goalBody(k, g, day) {
       for (let i = 0; i < free; i++) slots.push(`<div class="slot ${extraDone > i ? 'ok' : ''}"><span class="dot"></span>Beliebig</div>`);
       const list = ws.map((w) => `<button class="wo" data-act="editWorkout" data-date="${k}" data-id="${w.id}">
           <span class="wo-emoji">${WO_EMOJI[w.type] || '🏅'}</span>
-          <span class="wo-main"><b>${esc(w.type)}</b><span>${esc(workoutMeta(w))}</span></span>
-          <span class="kind-tag ${w.kind === 'outdoor' ? 'out' : ''}">${w.kind === 'outdoor' ? 'Draußen' : 'Drinnen'}</span>
+          <span class="wo-main">
+            <span class="wo-top"><b>${esc(w.type)}</b><span class="kind-tag ${w.kind === 'outdoor' ? 'out' : ''}">${w.kind === 'outdoor' ? 'Draußen' : 'Drinnen'}</span></span>
+            <span class="wo-meta">${esc(workoutMeta(w))}</span>
+            ${w.location ? `<span class="wo-meta">📍 ${esc(w.location)}</span>` : ''}
+          </span>
         </button>`).join('');
       return `<div class="slots">${slots.join('')}</div>
         ${list ? `<div class="wo-list">${list}</div>` : ''}
@@ -551,7 +555,7 @@ function goalBody(k, g, day) {
     }
     case 'calories': {
       const burned = (day.workouts || []).reduce((s, w) => s + (w.kcal || 0), 0);
-      return `<div class="input-unit"><input class="input" inputmode="numeric" enterkeyhint="done" placeholder="Gegessene Kalorien" data-ch="calories" ${D} value="${day.calories ?? ''}"><span>kcal</span></div>
+      return `<div class="input-unit"><input class="input" inputmode="numeric" enterkeyhint="done" placeholder="Gegessene Kalorien" data-ch="calories" ${D} value="${day.calories === null || day.calories === undefined ? '' : fi(day.calories)}"><span>kcal</span></div>
         <p class="tiny muted" style="margin-top:6px">Ziel: höchstens ${fi(g.target)} kcal${burned ? ` · durch Workouts verbrannt: ${fi(burned)} kcal` : ''}</p>`;
     }
     case 'reading': {
@@ -596,8 +600,7 @@ function workoutMeta(w) {
   if (w.distance) parts.push(`${f1(w.distance)} km`);
   const p = paceInfo(w.type, w.duration, w.distance);
   if (p) parts.push(p);
-  if (w.location) parts.push(w.location);
-  return parts.join(' · ') || 'Keine Details';
+  return parts.join(' · ') || 'Tippen, um Details zu ergänzen';
 }
 
 /* ---------- Kalender ---------- */
@@ -665,6 +668,7 @@ function renderSheet() {
     </div></div>
     <div class="sheet-body">${renderDay(k, false)}</div>`;
   sheet.scrollTop = scroll;
+  updateScrollLock();
   hydratePhotos(sheet);
 }
 
@@ -970,6 +974,7 @@ async function openPhotoViewer(k) {
   const url = await photoUrl(k);
   modal.className = 'modal viewer';
   modal.hidden = false;
+  updateScrollLock();
   modal.innerHTML = `<div class="viewer-box">
     <div class="viewer-bar">
       <button class="close-x" data-act="closeModal" aria-label="Schließen">${ICON.x}</button>
@@ -1118,7 +1123,6 @@ function goalEditor(g, i) {
     <div class="goal-edit-head">
       <button class="emoji-btn" data-act="cycleEmoji" ${D} aria-label="Symbol ändern">${g.icon}</button>
       <input class="input" data-ch="goalField" data-key="name" ${D} value="${esc(g.name)}" aria-label="Name">
-      <label class="switch" aria-label="Ziel aktiv"><input type="checkbox" data-ch="goalEnabled" ${D} ${g.enabled ? 'checked' : ''}><span></span></label>
     </div>
     ${fields}
     <div class="row">
@@ -1126,8 +1130,10 @@ function goalEditor(g, i) {
         <button data-act="moveGoal" data-d="-1" ${D} ${i === 0 ? 'disabled style="opacity:.35"' : ''} aria-label="Nach oben">${ICON.up}</button>
         <button data-act="moveGoal" data-d="1" ${D} ${i === data.goals.length - 1 ? 'disabled style="opacity:.35"' : ''} aria-label="Nach unten">${ICON.down}</button>
       </div>
+      ${g.builtin ? '' : `<button class="btn sm danger" data-act="delGoal" ${D}>Löschen</button>`}
       <span class="spacer"></span>
-      ${g.builtin ? `<span class="tiny muted">Standardziel</span>` : `<button class="btn sm danger" data-act="delGoal" ${D}>Löschen</button>`}
+      <span class="small strong muted">${g.enabled ? 'Aktiv' : 'Aus'}</span>
+      <label class="switch" aria-label="Ziel aktiv"><input type="checkbox" data-ch="goalEnabled" ${D} ${g.enabled ? 'checked' : ''}><span></span></label>
     </div>
   </div>`;
 }
@@ -1180,6 +1186,7 @@ function renderWorkoutForm() {
   const showDist = !!DIST[wf.type];
   modal.className = 'modal';
   modal.hidden = false;
+  updateScrollLock();
   modal.innerHTML = `<div class="modal-box" role="dialog" aria-modal="true">
     <div class="modal-grip"></div>
     <div class="modal-title"><h2>${wf.id ? 'Workout bearbeiten' : 'Workout eintragen'}</h2><button class="close-x" data-act="closeModal" aria-label="Schließen">${ICON.x}</button></div>
@@ -1212,7 +1219,8 @@ function readWorkoutForm() {
   wf.note = f.note.value.trim();
 }
 
-function closeModal() { modal.hidden = true; modal.innerHTML = ''; modal.className = 'modal'; wf = null; }
+function closeModal() { modal.hidden = true; modal.innerHTML = ''; modal.className = 'modal'; wf = null; updateScrollLock(); }
+function updateScrollLock() { document.body.classList.toggle('locked', !modal.hidden || !!ui.sheetDate); }
 
 /* =========================================================
    Toast
@@ -1277,7 +1285,7 @@ const ACT = {
 
   openDay(d) { ui.sheetDate = d.date; renderSheet(); },
   sheetDay(d) { const n = addDays(ui.sheetDate, Number(d.d)); if (n > todayKey()) return; ui.sheetDate = n; renderSheet(); sheet.scrollTop = 0; },
-  closeSheet() { ui.sheetDate = null; sheet.hidden = true; sheet.innerHTML = ''; ui.calYM = ui.calYM; render(); },
+  closeSheet() { ui.sheetDate = null; sheet.hidden = true; sheet.innerHTML = ''; render(); },
   calMonth(d) { ui.calYM = addMonths(ui.calYM, Number(d.d)); render(); },
   calToday() { ui.calYM = ymOf(todayKey()); render(); },
   monthNav(d) { ui.monthYM = addMonths(ui.monthYM, Number(d.d)); render(); },
@@ -1571,5 +1579,11 @@ applyTheme();
 render();
 if (navigator.storage && navigator.storage.persist) navigator.storage.persist().catch(() => {});
 if ('serviceWorker' in navigator && location.protocol.startsWith('http')) {
-  window.addEventListener('load', () => navigator.serviceWorker.register('sw.js').catch(() => {}));
+  const hadController = !!navigator.serviceWorker.controller;
+  let reloaded = false;
+  navigator.serviceWorker.addEventListener('controllerchange', () => {
+    if (!hadController || reloaded || textInputFocused() || !modal.hidden) return;
+    reloaded = true; location.reload();
+  });
+  window.addEventListener('load', () => navigator.serviceWorker.register('sw.js').then((r) => r.update()).catch(() => {}));
 }
