@@ -17,6 +17,8 @@ Installierbare Web-App (PWA) zum Tracken der 75 Hard Challenge – läuft komple
 - **Kalender** – jeden Tag ansehen und nachtragen
 - **Monat** – Monatsbilanz, Heatmap, Ziel-Quoten, Sportarten
 - **Trends** – Diagramme & Auswertungen (7 / 30 Tage, Challenge, Gesamt)
+- **Gewicht** – wöchentliche Messungen, Verlauf, Zielgewicht mit Prognose
+- **Rechner** – Kalorienverbrauch je Sportart aus Gewicht, Dauer und Intensität/Tempo
 - **Fotos** – alle Progress Pictures + Vorher/Nachher-Vergleich
 - **Bücher** – Sachbücher anlegen, Fortschritt & Fertig-Prognose
 - **Einstellungen** (Zahnrad oben rechts) – 3 Farbthemen, Challenge-Start, Ziele bearbeiten/hinzufügen, Backup
@@ -27,4 +29,4 @@ Alle Einträge liegen nur auf dem Gerät (localStorage, Fotos in IndexedDB). Üb
 
 ## Updates
 
-Nach Änderungen an den Dateien in `sw.js` die Zeile `const CACHE = 'sh75-v2'` hochzählen (z. B. `sh75-v3`), damit das Handy sicher die neue Version lädt.
+Nach Änderungen an den Dateien in `sw.js` die Zeile `const CACHE = 'sh75-v3'` hochzählen (z. B. `sh75-v4`), damit das Handy sicher die neue Version lädt.

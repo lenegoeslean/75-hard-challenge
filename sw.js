@@ -1,11 +1,11 @@
 /* Service Worker – Schnobbies 75 Hard Challenge
    Netzwerk zuerst (damit Updates beim Öffnen sofort ankommen), Cache als Offline-Fallback. */
-const CACHE = 'sh75-v2';
+const CACHE = 'sh75-v3';
 const ASSETS = [
   './',
   './index.html',
-  './styles.css?v=2',
-  './app.js?v=2',
+  './styles.css?v=3',
+  './app.js?v=3',
   './manifest.webmanifest',
   './fonts/dmsans.woff2',
   './fonts/serif600.woff2',

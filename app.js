@@ -6,7 +6,7 @@
    Konstanten
    ========================================================= */
 const LS_KEY = 'sh75-data-v1';
-const APP_VERSION = '1.1';
+const APP_VERSION = '1.2';
 
 const THEMES = {
   t1: { name: 'Olive & Bordeaux', light: '#CAD183', dark: '#66023C' },
@@ -42,10 +42,30 @@ const DEFAULT_GOALS = [
   { id: 'calories', type: 'calories', name: 'Kalorienziel einhalten', icon: '🍽️', target: 1800, enabled: true, builtin: true },
   { id: 'reading', type: 'reading', name: '10 Seiten lesen', icon: '📖', target: 10, enabled: true, builtin: true },
   { id: 'photo', type: 'photo', name: 'Progress Picture', icon: '📸', enabled: true, builtin: true },
-  { id: 'tidy', type: 'check', name: '10 Minuten aufräumen', icon: '🧹', note: '10 Minuten Ordnung schaffen', enabled: true, builtin: true }
+  { id: 'tidy', type: 'check', name: '10 Minuten aufräumen', icon: '🧹', note: '10 Minuten Ordnung schaffen', enabled: true, builtin: true },
+  { id: 'weight', type: 'weight', name: 'Gewicht eintragen', icon: '⚖️', weekday: 0, enabled: true, builtin: true }
 ];
 
-const TAB_TITLES = { heute: 'Heute', kalender: 'Kalender', monat: 'Monat', trends: 'Trends', fotos: 'Progress Fotos', buecher: 'Bücher', einstellungen: 'Einstellungen' };
+/* MET-Werte je Sportart: [locker, moderat, intensiv, Tempo-Tabelle]
+   Richtwerte angelehnt an das Compendium of Physical Activities. */
+const MET = {
+  'Homeworkout': [3.5, 5.0, 8.0], 'Gym': [3.5, 5.0, 6.0], 'Hula Hoop': [3.5, 4.5, 6.0], 'Zirkeltraining': [4.3, 6.0, 8.0],
+  'Laufband': [6.0, 8.3, 11.0, 'run'], 'Crosstrainer': [4.0, 5.0, 7.0], 'Cycling': [3.5, 6.8, 8.8], 'Schwimmen': [5.0, 7.0, 9.8],
+  'Incline Walk': [5.0, 6.5, 8.5], 'Pilates': [2.5, 3.0, 4.0], 'Reformer Pilates': [3.0, 3.8, 5.0], 'Padel': [4.5, 6.0, 7.5],
+  'Stretching': [2.0, 2.3, 2.8], 'Yoga': [2.5, 3.0, 4.0], 'Laufen': [7.0, 9.8, 11.8, 'run'], 'Inline-Skaten': [5.0, 7.5, 9.8, 'inline'],
+  'Spazieren': [2.8, 3.5, 4.3, 'walk'], 'Radfahren': [4.0, 6.8, 10.0, 'bike']
+};
+/* Tempo (km/h) → MET */
+const SPEED_MET = {
+  walk: [[3.2, 2.8], [4.0, 3.0], [4.8, 3.5], [5.6, 4.3], [6.4, 5.0], [7.2, 7.0], [8.0, 8.3]],
+  run: [[6.4, 6.0], [8.0, 8.3], [8.4, 9.0], [9.7, 9.8], [10.8, 10.5], [11.3, 11.0], [12.1, 11.8], [13.8, 12.3], [14.5, 12.8], [16.1, 14.5], [17.7, 16.0], [19.3, 19.0]],
+  bike: [[10, 3.5], [14, 4.0], [17.5, 6.8], [20.5, 8.0], [23.7, 10.0], [28, 12.0], [33, 15.8]],
+  inline: [[10, 5.0], [14.4, 7.5], [17.7, 9.8], [21, 12.3], [24, 14.0]]
+};
+const INT_LBL = { lo: 'Locker', mid: 'Moderat', hi: 'Intensiv' };
+const ALL_SPORTS = [...new Set([...INDOOR, ...OUTDOOR])].sort((a, b) => a.localeCompare(b, 'de'));
+
+const TAB_TITLES = { heute: 'Heute', kalender: 'Kalender', monat: 'Monat', trends: 'Trends', gewicht: 'Gewicht', rechner: 'Kalorienrechner', fotos: 'Progress Fotos', buecher: 'Bücher', einstellungen: 'Einstellungen' };
 
 /* =========================================================
    Helfer
@@ -117,13 +137,16 @@ const ICON = {
 function defaultData() {
   return {
     version: 1,
-    settings: { theme: 't1', startDate: todayKey(), challengeDays: 75 },
+    settings: { theme: 't1', startDate: todayKey(), challengeDays: 75, weightTarget: null, height: null, calc: defaultCalc() },
     goals: JSON.parse(JSON.stringify(DEFAULT_GOALS)),
     days: {},
+    weights: {},
     books: [],
     activeBookId: null
   };
 }
+
+function defaultCalc() { return { type: 'Laufen', min: 30, intensity: 'mid', dist: null, kg: null, kgSetAt: 0, rev: null }; }
 
 function loadData() {
   try {
@@ -144,6 +167,10 @@ function normalize(d) {
   if (!Array.isArray(out.goals) || !out.goals.length) out.goals = JSON.parse(JSON.stringify(DEFAULT_GOALS));
   out.days = out.days || {};
   out.books = Array.isArray(out.books) ? out.books : [];
+  out.weights = out.weights && typeof out.weights === 'object' ? out.weights : {};
+  out.settings.calc = Object.assign(defaultCalc(), (d && d.settings && d.settings.calc) || {});
+  // Neue Standardziele (z. B. „Gewicht eintragen“) bei bestehenden Daten ergänzen
+  DEFAULT_GOALS.forEach((g) => { if (!out.goals.some((x) => x.id === g.id)) out.goals.push(JSON.parse(JSON.stringify(g))); });
   return out;
 }
 
@@ -195,7 +222,7 @@ function workoutCounts(ws) {
   return { inn, out: ws.length - inn, total: ws.length };
 }
 
-function goalProgress(g, day) {
+function goalProgress(g, day, k) {
   const manual = !!(day.checks && day.checks[g.id]);
   let frac = 0, auto = false, status = '';
   const t = Number(g.target) || 0;
@@ -245,6 +272,18 @@ function goalProgress(g, day) {
       status = manual ? 'Erledigt' : (g.note || 'Abhaken, wenn erledigt');
       break;
     }
+    case 'weight': {
+      const today = todayKey();
+      const k0 = k || today;
+      const start = wiegetagOf(g, k0), end = addDays(start, 6);
+      const hit = weightKeys().filter((w) => w >= start && w <= end).pop();
+      auto = !!hit; frac = auto ? 1 : 0;
+      if (hit) status = `${f1(data.weights[hit].kg)} kg am ${fmtShort(hit)} ✓`;
+      else if (end < today) status = 'Nicht eingetragen';
+      else if (start === k0) status = k0 === today ? 'Heute ist Wiegetag' : `Wiegetag · nachtragen bis ${fmtShort(end)}`;
+      else status = `Noch offen – Wiegetag war ${fmtMed(start)}`;
+      break;
+    }
     case 'number': {
       const v = day.values ? day.values[g.id] : null;
       const unit = g.unit ? ' ' + g.unit : '';
@@ -266,9 +305,14 @@ function goalProgress(g, day) {
   return { frac, done, auto, manual, status };
 }
 
+/* Wöchentliche Ziele zählen nur an ihrem Wochentag */
+function isDue(g, k) { return g.type !== 'weight' || wdIndex(k) === (g.weekday ?? 0); }
+/* Letzter Wiegetag am oder vor k */
+function wiegetagOf(g, k) { return addDays(k, -((wdIndex(k) - (g.weekday ?? 0) + 7) % 7)); }
+
 function dayStats(k) {
   const day = getDay(k);
-  const items = enabledGoals().map((g) => ({ g, p: goalProgress(g, day) }));
+  const items = enabledGoals().filter((g) => isDue(g, k)).map((g) => ({ g, p: goalProgress(g, day, k) }));
   const doneCount = items.filter((i) => i.p.done).length;
   const avg = items.length ? items.reduce((s, i) => s + i.p.frac, 0) / items.length : 0;
   return { day, items, doneCount, total: items.length, pct: Math.round(avg * 100), complete: items.length > 0 && doneCount === items.length, has: hasData(data.days[k]) };
@@ -304,6 +348,87 @@ function paceInfo(type, dur, dist) {
     return `${m}:${pad(s === 60 ? 0 : s)} min/100 m`;
   }
   return '';
+}
+
+/* =========================================================
+   Gewicht
+   ========================================================= */
+const weightKeys = () => Object.keys(data.weights || {}).filter((k) => data.weights[k] && data.weights[k].kg).sort();
+function latestWeight() { const ks = weightKeys(); if (!ks.length) return null; const k = ks[ks.length - 1]; return Object.assign({ k }, data.weights[k]); }
+function weightAtOrBefore(k) { const ks = weightKeys().filter((w) => w <= k); if (!ks.length) return null; const w = ks[ks.length - 1]; return Object.assign({ k: w }, data.weights[w]); }
+function weightNear(k, tol = 3) {
+  let best = null;
+  weightKeys().forEach((w) => { const d = Math.abs(diffDays(w, k)); if (d <= tol && (!best || d < best.d)) best = { k: w, kg: data.weights[w].kg, d }; });
+  return best;
+}
+function weightChangeBetween(from, to) {
+  const ks = weightKeys().filter((k) => k >= from && k <= to);
+  return ks.length < 2 ? null : data.weights[ks[ks.length - 1]].kg - data.weights[ks[0]].kg;
+}
+/* Trend in kg pro Tag (lineare Regression über die letzten Wochen) */
+function weightSlope(days = 42) {
+  const ks = weightKeys(); if (ks.length < 2) return null;
+  const last = ks[ks.length - 1];
+  let pts = ks.filter((k) => k >= addDays(last, -days));
+  if (pts.length < 2) pts = ks.slice(-2);
+  if (diffDays(pts[0], pts[pts.length - 1]) < 6) return null;
+  const xs = pts.map((k) => diffDays(pts[0], k)), ys = pts.map((k) => data.weights[k].kg);
+  const mx = xs.reduce((a, b) => a + b, 0) / xs.length, my = ys.reduce((a, b) => a + b, 0) / ys.length;
+  let num = 0, den = 0;
+  xs.forEach((x, i) => { num += (x - mx) * (ys[i] - my); den += (x - mx) * (x - mx); });
+  return den ? num / den : null;
+}
+function signed(n) { if (n === null || n === undefined) return '–'; if (Math.abs(n) < 0.05) return '±0'; return (n < 0 ? '−' : '+') + NF1.format(Math.abs(n)); }
+const kgStr = (n) => (n === null || n === undefined || n === '') ? '' : NF1.format(Math.round(n * 10) / 10);
+
+function saveWeight(k, v, note) {
+  const n = parseNum(v);
+  if (n === null) return false;
+  if (n < 25 || n > 350) { toast('Bitte ein gültiges Gewicht eingeben'); return false; }
+  if (k > todayKey()) { toast('Das Datum liegt in der Zukunft'); return false; }
+  const kg = Math.round(n * 10) / 10;
+  const prev = data.weights[k];
+  if (prev && prev.kg === kg && (note === undefined || (prev.note || '') === note)) return true;
+  data.weights[k] = { kg, note: note !== undefined ? note : (prev && prev.note) || '', at: Date.now() };
+  save();
+  toast(prev ? `⚖️ Messung vom ${fmtShort(k)} aktualisiert` : `⚖️ ${kgStr(kg)} kg gespeichert`);
+  const wg = goalById('weight');
+  if (wg && wg.enabled && isDue(wg, k) && dayStats(k).complete) setTimeout(() => toast('🎉 Alle Ziele für den Tag erreicht!'), 1400);
+  return true;
+}
+
+/* =========================================================
+   Kalorienrechner
+   ========================================================= */
+function interp(tbl, v) {
+  if (v <= tbl[0][0]) return tbl[0][1];
+  for (let i = 1; i < tbl.length; i++) {
+    if (v <= tbl[i][0]) { const [x0, y0] = tbl[i - 1], [x1, y1] = tbl[i]; return y0 + ((y1 - y0) * (v - x0)) / (x1 - x0); }
+  }
+  return tbl[tbl.length - 1][1];
+}
+function metFor(type, intensity = 'mid', dist = null, min = null) {
+  const m = MET[type]; if (!m) return { met: 5, fromSpeed: false, speed: null };
+  const mode = m[3];
+  if (mode && dist > 0 && min > 0) {
+    const speed = dist / (min / 60);
+    if (speed >= 1 && speed <= 60) {
+      let tbl = mode;
+      if (mode === 'run' && speed < 6.4) tbl = 'walk';
+      if (mode === 'walk' && speed > 8) tbl = 'run';
+      return { met: Math.round(interp(SPEED_MET[tbl], speed) * 10) / 10, fromSpeed: true, speed };
+    }
+  }
+  const idx = { lo: 0, mid: 1, hi: 2 }[intensity] ?? 1;
+  return { met: m[idx], fromSpeed: false, speed: null };
+}
+const kcalFor = (met, kg, min) => (met * 3.5 * kg / 200) * min;
+/* Gewicht für Berechnungen: zuletzt manuell eingegeben oder letzte Messung – je nachdem, was neuer ist */
+function calcKg() {
+  const c = data.settings.calc, l = latestWeight();
+  if (c.kg && (!l || (c.kgSetAt || 0) >= (l.at || 0))) return { kg: c.kg, src: 'manual' };
+  if (l) return { kg: l.kg, src: l.k };
+  return { kg: null, src: null };
 }
 
 /* =========================================================
@@ -408,7 +533,9 @@ const ui = {
   addGoalOpen: false,
   newGoal: { icon: '✅', name: '', type: 'check', target: '', unit: '', direction: 'min' },
   editBookId: null,
-  addBookOpen: false
+  addBookOpen: false,
+  wEdit: null,
+  wRange: 'challenge'
 };
 let pendingRender = false;
 let pointerDown = false;
@@ -446,9 +573,14 @@ function render() {
     case 'trends': html = renderTrends(); break;
     case 'fotos': html = renderFotos(); break;
     case 'buecher': html = renderBuecher(); break;
+    case 'gewicht': html = renderGewicht(); break;
+    case 'rechner': html = renderRechner(); break;
     case 'einstellungen': html = renderSettings(); break;
   }
   view.innerHTML = html;
+  if (ui.tab === 'rechner') updateCalc();
+  const ab = document.querySelector('.tabbar button.active');
+  if (ab && ab.scrollIntoView) { try { ab.scrollIntoView({ inline: 'nearest', block: 'nearest' }); } catch (e) { /* alt */ } }
   if (ui.sheetDate) renderSheet();
   updateScrollLock();
   hydratePhotos();
@@ -489,8 +621,10 @@ function heroHTML(k, st, isToday) {
 
 function renderDay(k, isToday) {
   const st = dayStats(k);
+  const wg = enabledGoals().find((g) => g.type === 'weight' && !isDue(g, k));
+  const weekly = wg ? weeklyCard(k, wg, goalProgress(wg, st.day, k)) : '';
   return heroHTML(k, st, isToday) +
-    `<div class="stack" style="margin-top:14px">${st.items.map((i) => goalCard(k, i.g, i.p, st.day)).join('')}</div>` +
+    `<div class="stack" style="margin-top:14px">${st.items.map((i) => goalCard(k, i.g, i.p, st.day)).join('')}${weekly}</div>` +
     (st.items.length ? '' : `<div class="card empty"><div class="ei">🎯</div><b>Keine aktiven Ziele</b>Lege in den Einstellungen deine Tagesziele fest.</div>`);
 }
 
@@ -499,11 +633,24 @@ function goalCard(k, g, p, day) {
     <div class="goal-head">
       <button class="check ${p.done ? 'on' : ''}" data-act="toggleGoal" data-date="${k}" data-goal="${g.id}" aria-label="${esc(g.name)} abhaken">${ICON.check}</button>
       <span class="goal-emoji">${g.icon}</span>
-      <div class="goal-title"><h3>${esc(g.name)}</h3><p>${esc(p.status)}${p.manual && !p.auto && g.type !== 'check' ? ' · manuell abgehakt' : ''}</p></div>
+      <div class="goal-title"><h3>${esc(g.name)}${g.type === 'weight' ? ' <span class="kind-tag">Wöchentlich</span>' : ''}</h3><p>${esc(p.status)}${p.manual && !p.auto && g.type !== 'check' ? ' · manuell abgehakt' : ''}</p></div>
       <span class="goal-pct">${Math.round(p.frac * 100)}%</span>
     </div>
-    ${g.type === 'check' || g.type === 'photo' ? '' : `<div class="bar"><i style="width:${Math.round(p.frac * 100)}%"></i></div>`}
+    ${g.type === 'check' || g.type === 'photo' || g.type === 'weight' ? '' : `<div class="bar"><i style="width:${Math.round(p.frac * 100)}%"></i></div>`}
     <div class="goal-body">${goalBody(k, g, day)}</div>
+  </article>`;
+}
+
+/* Wöchentliches Ziel an Nicht-Wiegetagen: sichtbar, zählt aber nicht zur Tageswertung */
+function weeklyCard(k, g, p) {
+  return `<article class="goal weekly ${p.done ? 'done' : ''}">
+    <div class="goal-head">
+      <span class="check ${p.done ? 'on' : ''}" aria-hidden="true">${ICON.check}</span>
+      <span class="goal-emoji">${g.icon}</span>
+      <div class="goal-title"><h3>${esc(g.name)} <span class="kind-tag">Wöchentlich</span></h3><p>${esc(p.status)}</p></div>
+    </div>
+    <p class="tiny muted" style="margin-top:8px">Zählt nur am ${WEEKDAYS_LONG[g.weekday ?? 0]} zur Tageswertung.</p>
+    ${p.done ? '' : `<div class="goal-body">${goalBody(k, g, getDay(k))}</div>`}
   </article>`;
 }
 
@@ -520,7 +667,7 @@ function goalBody(k, g, day) {
         const full = v >= (i + 1) * 250;
         glasses += `<button class="glass ${full ? 'full' : ''}" data-act="glass" data-i="${i}" ${D} aria-label="${(i + 1) * 250} ml"><svg viewBox="0 0 24 30"><path class="outline" d="M3 2h18l-2.3 25a2 2 0 0 1-2 1.8H7.3a2 2 0 0 1-2-1.8z"/><path class="water" d="M4.6 10h14.8l-1.75 16.4a1 1 0 0 1-1 .9H7.35a1 1 0 0 1-1-.9z"/></svg></button>`;
       }
-      return `<div class="glasses">${glasses}</div>
+      return `<div class="glasses" style="grid-template-columns:repeat(${Math.min(n, 12)}, minmax(0, 1fr))">${glasses}</div>
         <div class="water-total"><span class="muted small">Ein Glas = 250 ml</span><b>${fL(v)} L</b></div>
         <div class="stepper">
           <button class="btn secondary" data-act="water" data-d="-250" ${D}>− 250</button>
@@ -585,6 +732,15 @@ function goalBody(k, g, day) {
           </div>`;
       }
       return `<button class="photo-empty" data-act="addPhoto" data-date="${k}"><span class="em">📸</span><b>Foto aufnehmen oder auswählen</b><span class="tiny">Wird nur auf diesem Gerät gespeichert</span></button>`;
+    case 'weight': {
+      const cur = data.weights[k];
+      const last = latestWeight();
+      return `<div class="stepper">
+          <div class="input-unit"><input class="input" inputmode="decimal" enterkeyhint="done" data-ch="wQuick" data-date="${k}" value="${cur ? kgStr(cur.kg) : ''}" placeholder="${last ? kgStr(last.kg) : 'Gewicht'}" aria-label="Gewicht in kg"><span>kg</span></div>
+          <button class="btn" data-act="wQuickSave" data-date="${k}">Speichern</button>
+        </div>
+        <p class="tiny muted" style="margin-top:8px">Verlauf, Ziel & Prognose im Reiter <button class="linkbtn" data-act="nav" data-tab="gewicht">Gewicht</button></p>`;
+    }
     case 'number': {
       const v = day.values ? day.values[g.id] : null;
       return `<div class="input-unit"><input class="input" inputmode="decimal" enterkeyhint="done" placeholder="Wert eintragen" data-ch="numVal" ${D} value="${numStr(v)}"><span>${esc(g.unit || '')}</span></div>`;
@@ -704,10 +860,8 @@ function renderMonat() {
     heat += `<div class="c" style="background:${heatColor(p)};color:${heatText(p)}" title="${fmtShort(k)}: ${Math.round(p * 100)}%">${d}</div>`;
   });
 
-  const goalRates = enabledGoals().map((g) => {
-    const cnt = stats.filter((x) => x.s.items.find((i) => i.g.id === g.id)?.p.done).length;
-    return { g, cnt, pct: cnt / stats.length };
-  });
+  const goalRates = goalRateList(stats);
+  const wChange = weightChangeBetween(`${ym}-01`, `${ym}-${pad(n)}`);
 
   return `<div class="stack">
     ${nav}
@@ -717,7 +871,8 @@ function renderMonat() {
         <div class="ring">${ringSvg(avg / 100)}<div class="ring-label"><div><b>${avg}%</b><small>Ø PRO TAG</small></div></div></div>
         <div class="hero-text"><div class="big">${perfect} perfekte ${perfect === 1 ? 'Tag' : 'Tage'}</div>
           <div class="sub">Bester Tag: ${fmtShort(best.k)} mit ${best.s.pct}%</div>
-          <div class="sub">Längste Serie: ${bestStreak(keys)} ${bestStreak(keys) === 1 ? 'Tag' : 'Tage'}</div></div>
+          <div class="sub">Längste Serie: ${bestStreak(keys)} ${bestStreak(keys) === 1 ? 'Tag' : 'Tage'}</div>
+          ${wChange !== null ? `<div class="sub">Gewicht: ${signed(wChange)} kg</div>` : ''}</div>
       </div>
     </section>
     <div class="card"><h2>Tag für Tag</h2>
@@ -726,12 +881,21 @@ function renderMonat() {
       <div class="legend"><span>Hell = wenig erreicht · Dunkel = alle Ziele</span></div>
     </div>
     <div class="card"><h2>Ziele im Monat</h2>
-      ${goalRates.map((r) => `<div class="hbar"><span class="lbl">${r.g.icon} ${esc(r.g.name)}</span><span class="v">${r.cnt}/${stats.length} Tage</span><div class="bar"><i style="width:${Math.round(r.pct * 100)}%"></i></div></div>`).join('')}
+      ${goalRates.map((r) => `<div class="hbar"><span class="lbl">${r.g.icon} ${esc(r.g.name)}</span><span class="v">${r.cnt}/${r.n} ${r.g.type === 'weight' ? (r.n === 1 ? 'Wiegetag' : 'Wiegetage') : 'Tage'}</span><div class="bar"><i style="width:${Math.round(r.r * 100)}%"></i></div></div>`).join('')}
     </div>
     <h3 class="section-title">Aktivität</h3>
     ${kpiGrid(ag, stats.length)}
     ${sportBreakdown(ag)}
   </div>`;
+}
+
+/* Erfüllungsquote je Ziel – bezogen auf die Tage, an denen das Ziel fällig war */
+function goalRateList(stats) {
+  return enabledGoals().map((g) => {
+    const due = stats.filter((x) => x.s.items.some((i) => i.g.id === g.id));
+    const cnt = due.filter((x) => x.s.items.find((i) => i.g.id === g.id).p.done).length;
+    return { g, cnt, n: due.length, r: due.length ? cnt / due.length : 0 };
+  }).filter((x) => x.n > 0);
 }
 
 function aggregate(keys) {
@@ -821,8 +985,8 @@ function renderTrends() {
   const wdAvg = wd.map((w) => (w.n ? Math.round(w.s / w.n) : null));
 
   // Ziel-Quoten
-  const rates = enabledGoals().map((g) => ({ g, r: stats.filter((x) => x.s.items.find((i) => i.g.id === g.id)?.p.done).length / stats.length }))
-    .sort((a, b) => b.r - a.r);
+  const rates = goalRateList(stats).sort((a, b) => b.r - a.r);
+  const wChange = weightChangeBetween(keys[0], keys[keys.length - 1]);
 
   const insights = buildInsights({ stats, avg, prevAvg, ag, pag, wdAvg, rates });
 
@@ -834,7 +998,8 @@ function renderTrends() {
         <div class="ring">${ringSvg(avg / 100)}<div class="ring-label"><div><b>${avg}%</b><small>Ø PRO TAG</small></div></div></div>
         <div class="hero-text"><div class="big">${perfect} perfekte ${perfect === 1 ? 'Tag' : 'Tage'}</div>
           <div class="sub">Längste Serie: ${bestStreak(keys)} ${bestStreak(keys) === 1 ? 'Tag' : 'Tage'}</div>
-          ${prevAvg !== null ? `<div class="sub">Vorperiode: Ø ${prevAvg}%</div>` : ''}</div>
+          ${prevAvg !== null ? `<div class="sub">Vorperiode: Ø ${prevAvg}%</div>` : ''}
+          ${wChange !== null ? `<div class="sub">Gewicht: ${signed(wChange)} kg</div>` : ''}</div>
       </div>
     </section>
     ${insights.length ? `<div class="card"><h2>Auf einen Blick</h2><div style="margin-top:8px">${insights.map((i) => `<div class="insight"><span class="ie">${i[0]}</span><span>${i[1]}</span></div>`).join('')}</div></div>` : ''}
@@ -949,15 +1114,16 @@ function renderFotos() {
   if (!ui.cmpA || !keys.includes(ui.cmpA)) ui.cmpA = keys[0];
   if (!ui.cmpB || !keys.includes(ui.cmpB)) ui.cmpB = keys[keys.length - 1];
   const lbl = (k) => challengeDay(k) >= 1 ? `Tag ${challengeDay(k)}` : fmtShort(k);
+  const wA = weightNear(ui.cmpA), wB = weightNear(ui.cmpB);
   const opt = (sel) => keys.map((k) => `<option value="${k}" ${k === sel ? 'selected' : ''}>${challengeDay(k) >= 1 ? lbl(k) + ' · ' : ''}${fmtShort(k)}</option>`).join('');
   return `<div class="stack">
     ${addCard}
     ${keys.length < 2 ? `<div class="card empty"><div class="ei">🪞</div><b>Vorher / Nachher</b>Ab dem zweiten Foto kannst du hier zwei Tage nebeneinander vergleichen.</div>` : `<div class="card"><h2>Vorher / Nachher</h2>
       <div class="compare" style="margin-top:12px">
-        <figure><img data-photo="${ui.cmpA}" alt="Vergleichsfoto 1" data-act="openPhoto" data-date="${ui.cmpA}"><figcaption><select class="input" data-ch="cmpA">${opt(ui.cmpA)}</select></figcaption></figure>
-        <figure><img data-photo="${ui.cmpB}" alt="Vergleichsfoto 2" data-act="openPhoto" data-date="${ui.cmpB}"><figcaption><select class="input" data-ch="cmpB">${opt(ui.cmpB)}</select></figcaption></figure>
+        <figure><img data-photo="${ui.cmpA}" alt="Vergleichsfoto 1" data-act="openPhoto" data-date="${ui.cmpA}"><figcaption><select class="input" data-ch="cmpA">${opt(ui.cmpA)}</select>${wA ? `<div class="tiny muted center" style="margin-top:4px">⚖️ ${kgStr(wA.kg)} kg</div>` : ''}</figcaption></figure>
+        <figure><img data-photo="${ui.cmpB}" alt="Vergleichsfoto 2" data-act="openPhoto" data-date="${ui.cmpB}"><figcaption><select class="input" data-ch="cmpB">${opt(ui.cmpB)}</select>${wB ? `<div class="tiny muted center" style="margin-top:4px">⚖️ ${kgStr(wB.kg)} kg</div>` : ''}</figcaption></figure>
       </div>
-      ${ui.cmpA !== ui.cmpB ? `<p class="small muted center" style="margin-top:8px">${Math.abs(diffDays(ui.cmpA, ui.cmpB))} Tage dazwischen</p>` : ''}
+      ${ui.cmpA !== ui.cmpB ? `<p class="small muted center" style="margin-top:8px">${Math.abs(diffDays(ui.cmpA, ui.cmpB))} Tage dazwischen${wA && wB && wA.k !== wB.k ? ` · ${signed(diffDays(ui.cmpA, ui.cmpB) >= 0 ? wB.kg - wA.kg : wA.kg - wB.kg)} kg` : ''}</p>` : ''}
     </div>`}
     <div class="card"><h2>Alle Fotos</h2>
       <div class="photo-grid" style="margin-top:12px">
@@ -1066,6 +1232,266 @@ function bookForm(b) {
     </form></div>`;
 }
 
+/* ---------- Gewicht ---------- */
+function renderGewicht() {
+  const ks = weightKeys();
+  const today = todayKey();
+  const s = data.settings;
+  const last = latestWeight();
+  const wg = goalById('weight');
+  const editK = ui.wEdit && data.weights[ui.wEdit] ? ui.wEdit : null;
+  const formDate = editK || today;
+  const formVal = data.weights[formDate] || null;
+
+  const form = `<div class="card">
+    <div class="card-head"><h2>${editK ? `Messung vom ${fmtShort(editK)}` : 'Gewicht eintragen'}</h2>${editK ? `<button class="close-x" data-act="wCancel" aria-label="Abbrechen">${ICON.x}</button>` : ''}</div>
+    <form id="weightForm" class="stack" style="gap:10px">
+      <label class="field">Datum<input class="input" type="date" name="date" value="${formDate}" max="${today}"></label>
+      <div class="field"><span>Gewicht</span>
+        <div class="stepper">
+          <button type="button" class="btn secondary" data-act="wStep" data-d="-0.1" aria-label="0,1 kg weniger">− 0,1</button>
+          <div class="input-unit"><input class="input" name="kg" inputmode="decimal" value="${formVal ? kgStr(formVal.kg) : ''}" placeholder="${last ? kgStr(last.kg) : 'z. B. 68,5'}" aria-label="Gewicht in kg"><span>kg</span></div>
+          <button type="button" class="btn secondary" data-act="wStep" data-d="0.1" aria-label="0,1 kg mehr">+ 0,1</button>
+        </div>
+      </div>
+      <label class="field">Notiz<input class="input" name="note" value="${esc(formVal ? formVal.note || '' : '')}" placeholder="optional, z. B. nach dem Aufstehen"></label>
+      <button class="btn block" type="submit">${formVal ? 'Messung aktualisieren' : 'Speichern'}</button>
+      ${editK ? `<button class="btn danger block" type="button" data-act="wDel" data-date="${editK}">Messung löschen</button>` : ''}
+    </form>
+    ${!editK ? `<p class="tiny muted" style="margin-top:8px">Tipp: immer am gleichen Wochentag, morgens nach dem Aufstehen wiegen – so sind die Werte vergleichbar.</p>` : ''}
+  </div>`;
+
+  const targetInputs = `<div class="grid2" style="margin-top:12px">
+      <label class="field">Zielgewicht<div class="input-unit"><input class="input" inputmode="decimal" data-ch="wTarget" value="${s.weightTarget ? kgStr(s.weightTarget) : ''}" placeholder="z. B. 62"><span>kg</span></div></label>
+      <label class="field">Körpergröße<div class="input-unit"><input class="input" inputmode="numeric" data-ch="wHeight" value="${s.height || ''}" placeholder="optional"><span>cm</span></div></label>
+    </div>`;
+
+  if (!ks.length) {
+    return `<div class="stack">
+      <div class="card empty"><div class="ei">⚖️</div><b>Noch keine Messung</b>Einmal pro Woche reicht. Dein Wiegetag ist ${wg ? WEEKDAYS_LONG[wg.weekday ?? 0] : 'frei wählbar'} – änderbar in den Einstellungen.</div>
+      ${form}
+      <div class="card"><h2>Zielgewicht</h2><p class="small muted">Optional – dann siehst du Fortschritt und eine Prognose.</p>${targetInputs}</div>
+    </div>`;
+  }
+
+  // Bezugspunkte
+  const startRef = weightAtOrBefore(s.startDate) || Object.assign({ k: ks[0] }, data.weights[ks[0]]);
+  const startLbl = startRef.k <= s.startDate ? 'seit Start' : 'seit 1. Messung';
+  const prevK = ks.length > 1 ? ks[ks.length - 2] : null;
+  const dStart = last.kg - startRef.kg;
+  const dPrev = prevK ? last.kg - data.weights[prevK].kg : null;
+  const target = s.weightTarget;
+  const dir = target ? (target < startRef.kg ? -1 : 1) : -1;
+  const reached = target ? (dir < 0 ? last.kg <= target : last.kg >= target) : false;
+  const rem = target ? Math.abs(target - last.kg) : null;
+  const slope = weightSlope();
+
+  // Wiegetag-Status
+  let badge = '';
+  if (wg && wg.enabled) {
+    const p = goalProgress(wg, getDay(today), today);
+    badge = `<span class="badge">${p.done ? '✓ Diese Woche erledigt' : `⚖️ Wiegetag: ${WEEKDAYS[wg.weekday ?? 0]}`}</span>`;
+  }
+
+  const hero = `<section class="hero">
+    <div class="hero-top"><div><div class="hero-date">Aktuell · ${fmtMed(last.k)}</div><div class="hero-kg">${kgStr(last.kg)}<small> kg</small></div></div>${badge}</div>
+    <div class="hero-stats">
+      <div><b>${signed(dStart)} kg</b><span>${startLbl}</span></div>
+      <div><b>${dPrev === null ? '–' : signed(dPrev) + ' kg'}</b><span>zur letzten Messung</span></div>
+      ${target ? `<div><b>${reached ? 'Erreicht 🎉' : kgStr(rem) + ' kg'}</b><span>${reached ? 'Zielgewicht' : 'bis zum Ziel'}</span></div>` : ''}
+    </div>
+  </section>`;
+
+  // Ziel & Prognose
+  let goalBlock = `<p class="small muted">Lege ein Zielgewicht fest, dann siehst du Fortschritt und eine Prognose.</p>`;
+  if (target) {
+    const total = Math.abs(startRef.kg - target);
+    const moved = (last.kg - startRef.kg) * dir;
+    const pct = reached ? 1 : total > 0 ? clamp(moved / total, 0, 1) : 0;
+    let prog;
+    if (reached) prog = '🎉 Du hast dein Zielgewicht erreicht!';
+    else if (slope !== null && Math.abs(slope * 7) >= 0.05 && Math.sign(slope) === Math.sign(target - last.kg)) {
+      const days = Math.ceil((target - last.kg) / slope);
+      prog = days <= 730 ? `Bei deinem aktuellen Tempo (${signed(slope * 7)} kg pro Woche) erreichst du dein Ziel ca. am <b>${fmtFull(addDays(last.k, days))}</b>.` : 'Bei deinem aktuellen Tempo dauert es noch über zwei Jahre.';
+    } else prog = 'Die Prognose erscheint, sobald dein Verlauf über mindestens eine Woche Richtung Ziel zeigt.';
+    goalBlock = `<div class="row small" style="justify-content:space-between;margin-top:10px"><span class="muted">Start ${kgStr(startRef.kg)} kg</span><span class="strong">${Math.round(pct * 100)}%</span><span class="muted">Ziel ${kgStr(target)} kg</span></div>
+      <div class="bar" style="margin-top:6px"><i style="width:${Math.round(pct * 100)}%"></i></div>
+      <p class="small" style="margin-top:10px">${prog}</p>`;
+  }
+  const goalCardHTML = `<div class="card"><h2>Zielgewicht</h2>${goalBlock}${targetInputs}</div>`;
+
+  // Verlauf
+  const rangeFrom = ui.wRange === '90' ? addDays(today, -90) : ui.wRange === 'challenge' ? startRef.k : '0000-00-00';
+  const pts = ks.filter((k) => k >= rangeFrom).map((k) => ({ k, v: data.weights[k].kg }));
+  const seg = `<div class="seg" style="margin-top:12px">${[['challenge', 'Challenge'], ['90', '3 Monate'], ['all', 'Alles']].map(([v, l]) => `<button class="${ui.wRange === v ? 'on' : ''}" data-act="wRange" data-r="${v}">${l}</button>`).join('')}</div>`;
+  const chart = pts.length >= 2 ? lineChart({ pts, target, fmt: (p) => `${fmtMed(p.k)}: ${kgStr(p.v)} kg` })
+    : `<p class="small muted" style="margin-top:12px">Für den Verlauf brauchst du mindestens zwei Messungen in diesem Zeitraum.</p>`;
+  const chartCard = `<div class="card"><h2>Verlauf</h2><p class="small muted">in kg${target ? ' · gestrichelt = Zielgewicht' : ''} · tippe auf einen Punkt</p>${chart}${seg}</div>`;
+
+  // Kennzahlen
+  const vals = ks.map((k) => data.weights[k].kg);
+  const bestV = dir < 0 ? Math.min(...vals) : Math.max(...vals);
+  const bestK = ks[vals.indexOf(bestV)];
+  const tile = (label, val, sub) => `<div class="kpi"><div class="k-label">${label}</div><div class="k-val">${val}</div><div class="k-sub">${sub}</div></div>`;
+  const kpis = `<div class="kpis">
+    ${tile('Ø pro Woche', slope === null ? '–' : signed(slope * 7) + ' kg', 'Trend der letzten 6 Wochen')}
+    ${tile('Bestwert', kgStr(bestV) + ' kg', 'am ' + fmtShort(bestK))}
+    ${tile('Messungen', ks.length, 'seit ' + fmtShort(ks[0]))}
+    ${s.height ? tile('BMI', NF1.format(last.kg / Math.pow(s.height / 100, 2)), `bei ${s.height} cm`) : tile('Wiegetag', wg && wg.enabled ? WEEKDAYS_LONG[wg.weekday ?? 0] : 'Aus', 'änderbar in den Einstellungen')}
+  </div>`;
+
+  // Liste
+  const rows = ks.slice().reverse().map((k) => {
+    const i = ks.indexOf(k);
+    const w = data.weights[k];
+    const diff = i > 0 ? w.kg - data.weights[ks[i - 1]].kg : null;
+    const good = target && diff !== null && Math.abs(diff) >= 0.05 && Math.sign(diff) === dir;
+    const tag = diff === null ? '<span class="delta">Erste</span>'
+      : `<span class="delta ${good ? 'good' : ''}">${Math.abs(diff) < 0.05 ? '± 0' : (diff < 0 ? '▼ ' : '▲ ') + kgStr(Math.abs(diff))} kg</span>`;
+    return `<button class="wrow ${k === editK ? 'sel' : ''}" data-act="wEdit" data-date="${k}">
+      <span class="wo-main"><b>${kgStr(w.kg)} kg</b><span class="wo-meta">${fmtMed(k)}${w.note ? ' · ' + esc(w.note) : ''}</span></span>${tag}</button>`;
+  }).join('');
+  const list = `<div class="card"><h2>Alle Messungen</h2><p class="small muted">Tippe auf eine Messung, um sie zu bearbeiten.</p><div class="wo-list">${rows}</div></div>`;
+
+  return `<div class="stack">${hero}${form}${goalCardHTML}${chartCard}${kpis}${list}</div>`;
+}
+
+/* Liniendiagramm (eine Serie, Zeitachse) mit Ziellinie, Punkten & Fadenkreuz */
+function lineChart({ pts, target = null, fmt }) {
+  const W = 340, H = 180, L = 40, R = 12, T = 16, B = 24;
+  const iw = W - L - R, ih = H - T - B;
+  const ys = pts.map((p) => p.v).concat(target ? [target] : []);
+  let lo = Math.min(...ys), hi = Math.max(...ys);
+  const padv = Math.max(0.4, (hi - lo) * 0.12);
+  lo -= padv; hi += padv;
+  const step = [0.5, 1, 2, 2.5, 5, 10, 20, 50].find((st) => (hi - lo) / st <= 4) || 100;
+  lo = Math.floor(lo / step) * step; hi = Math.ceil(hi / step) * step;
+  const d0 = pts[0].k, dN = Math.max(1, diffDays(d0, pts[pts.length - 1].k));
+  const x = (k) => L + (diffDays(d0, k) / dN) * iw;
+  const y = (v) => T + ih - ((v - lo) / (hi - lo)) * ih;
+  let g = '<g class="grid">', ax = '<g class="axis">';
+  for (let v = lo; v <= hi + 1e-9; v += step) {
+    g += `<line x1="${L}" x2="${W - R}" y1="${y(v).toFixed(1)}" y2="${y(v).toFixed(1)}"/>`;
+    ax += `<text x="${L - 6}" y="${(y(v) + 3.5).toFixed(1)}" text-anchor="end">${NF1.format(Math.round(v * 10) / 10)}</text>`;
+  }
+  g += '</g>';
+  const first = pts[0].k, lastK = pts[pts.length - 1].k;
+  ax += `<text x="${L}" y="${H - 6}" text-anchor="start">${fmtShort(first)}</text><text x="${W - R}" y="${H - 6}" text-anchor="end">${fmtShort(lastK)}</text>`;
+  if (dN >= 20) { const mid = addDays(first, Math.round(dN / 2)); ax += `<text x="${x(mid).toFixed(1)}" y="${H - 6}" text-anchor="middle">${fmtShort(mid)}</text>`; }
+  ax += '</g>';
+  const P = pts.map((p) => [x(p.k), y(p.v)]);
+  const line = P.map((q, i) => `${i ? 'L' : 'M'}${q[0].toFixed(1)},${q[1].toFixed(1)}`).join('');
+  const area = `M${P[0][0].toFixed(1)},${T + ih}` + P.map((q) => `L${q[0].toFixed(1)},${q[1].toFixed(1)}`).join('') + `L${P[P.length - 1][0].toFixed(1)},${T + ih}Z`;
+  const tl = target ? `<line class="target" x1="${L}" x2="${W - R}" y1="${y(target).toFixed(1)}" y2="${y(target).toFixed(1)}"/><text class="tlabel" x="${W - R}" y="${(y(target) - 5).toFixed(1)}" text-anchor="end">Ziel ${kgStr(target)}</text>` : '';
+  const dots = P.map((q, i) => `<circle class="dot" cx="${q[0].toFixed(1)}" cy="${q[1].toFixed(1)}" r="${i === P.length - 1 ? 5 : 4}"/>`).join('');
+  const hits = P.map((q, i) => {
+    const x0 = i ? (P[i - 1][0] + q[0]) / 2 : L - 6, x1 = i < P.length - 1 ? (q[0] + P[i + 1][0]) / 2 : W - R + 6;
+    return `<rect class="hit" x="${x0.toFixed(1)}" y="${T}" width="${(x1 - x0).toFixed(1)}" height="${ih}" data-act="tip" data-tip="${esc(fmt(pts[i]))}" data-x="${q[0].toFixed(1)}" data-y="${q[1].toFixed(1)}"/>`;
+  }).join('');
+  return `<div class="chart"><svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Gewichtsverlauf">${g}${ax}<path class="area" d="${area}"/>${tl}<line class="xhair" x1="0" x2="0" y1="${T}" y2="${T + ih}"/><path class="line" d="${line}"/>${dots}${hits}</svg></div>`;
+}
+
+/* ---------- Kalorienrechner ---------- */
+function renderRechner() {
+  const c = data.settings.calc;
+  if (!MET[c.type]) c.type = 'Laufen';
+  const kgInfo = calcKg();
+  const hasSpeed = !!MET[c.type][3];
+  return `<div class="stack">
+    <div class="card"><h2>Was hast du gemacht?</h2>
+      <form id="calcForm" class="stack" style="gap:12px;margin-top:12px">
+        <label class="field">Sportart<select class="input" id="calcType">${ALL_SPORTS.map((t) => `<option value="${t}" ${t === c.type ? 'selected' : ''}>${WO_EMOJI[t] || ''} ${t}</option>`).join('')}</select></label>
+        <div class="grid2">
+          <label class="field">Gewicht<div class="input-unit"><input class="input" id="calcKg" inputmode="decimal" enterkeyhint="done" value="${kgInfo.kg ? kgStr(kgInfo.kg) : ''}" placeholder="z. B. 68"><span>kg</span></div></label>
+          <label class="field">Dauer<div class="input-unit"><input class="input" id="calcMin" inputmode="numeric" enterkeyhint="done" value="${c.min || ''}" placeholder="30"><span>min</span></div></label>
+        </div>
+        ${kgInfo.src && kgInfo.src !== 'manual' ? `<p class="tiny muted" style="margin-top:-6px">Gewicht aus deiner Messung vom ${fmtShort(kgInfo.src)}</p>` : ''}
+        <div class="pills">${[15, 30, 45, 60, 90].map((m) => `<button type="button" class="pill" data-act="calcMin" data-v="${m}">${m} min</button>`).join('')}</div>
+        <div class="field"><span>Intensität</span>
+          <div class="seg" id="calcIntSeg">${Object.entries(INT_LBL).map(([v, l]) => `<button type="button" class="${c.intensity === v ? 'on' : ''}" data-act="calcInt" data-v="${v}">${l}</button>`).join('')}</div>
+        </div>
+        ${hasSpeed ? `<label class="field">Distanz (optional)<div class="input-unit"><input class="input" id="calcDist" inputmode="decimal" enterkeyhint="done" value="${c.dist ? kgStr(c.dist) : ''}" placeholder="z. B. 5,0"><span>km</span></div></label>
+          <p class="tiny muted" id="calcSpeedHint" style="margin-top:-6px"></p>` : ''}
+      </form>
+    </div>
+    <div id="calcResult"></div>
+    <div class="card" id="calcRevBox"><h2>Umgekehrt gerechnet</h2><p class="small muted">Wie lange musst du für eine bestimmte Kalorienzahl trainieren?</p>
+      <div class="input-unit" style="margin-top:10px"><input class="input" id="calcRev" inputmode="numeric" enterkeyhint="done" value="${c.rev || ''}" placeholder="z. B. 300" aria-label="Wunsch-Kalorien"><span>kcal</span></div>
+      <div id="calcRevOut" class="rev-out"></div>
+    </div>
+    <div class="card" id="calcCompare"></div>
+    <div class="card"><h2>So wird gerechnet</h2>
+      <p class="small muted" style="margin-top:6px">Kalorien = MET × 3,5 × Gewicht (kg) ÷ 200 × Minuten. Der MET-Wert beschreibt, wie anstrengend eine Sportart ist (Richtwerte angelehnt an das Compendium of Physical Activities). Bei Laufen, Spazieren, Laufband, Radfahren und Inline-Skaten wird mit Distanz dein Tempo genutzt.</p>
+      <p class="small muted" style="margin-top:8px">Das Ergebnis ist eine Schätzung. Misst deine Uhr mit Puls, ist deren Wert meist genauer.</p>
+    </div>
+  </div>`;
+}
+
+function readCalcInputs() {
+  const c = data.settings.calc;
+  const val = (id) => { const el = document.getElementById(id); return el ? parseNum(el.value) : undefined; };
+  const kg = val('calcKg'); if (kg !== undefined) c.kg = kg;
+  const min = val('calcMin'); if (min !== undefined) c.min = min;
+  const dist = val('calcDist'); if (dist !== undefined) c.dist = dist;
+  const rev = val('calcRev'); if (rev !== undefined) c.rev = rev;
+}
+
+function updateCalc() {
+  const c = data.settings.calc;
+  const kgEl = $('#calcKg'); if (!kgEl) return;
+  const kg = parseNum(kgEl.value), min = parseNum(($('#calcMin') || {}).value), dist = parseNum(($('#calcDist') || {}).value);
+  const okKg = kg && kg >= 25 && kg <= 350;
+  const m = metFor(c.type, c.intensity, dist, min);
+  document.querySelectorAll('[data-act="calcMin"]').forEach((b) => b.classList.toggle('on', Number(b.dataset.v) === min));
+  const seg = $('#calcIntSeg'); if (seg) seg.classList.toggle('dim', m.fromSpeed);
+  const hint = $('#calcSpeedHint');
+  if (hint) hint.textContent = m.fromSpeed ? `Tempo ${NF1.format(m.speed)} km/h – die Intensität ergibt sich aus deinem Tempo.` : 'Mit Distanz wird dein Tempo genauer berücksichtigt.';
+  const em = WO_EMOJI[c.type] || '🏅';
+
+  // Ergebnis
+  const res = $('#calcResult');
+  if (!okKg) res.innerHTML = `<div class="card empty"><div class="ei">⚖️</div><b>Gewicht fehlt</b>Trag oben dein Gewicht ein – oder speichere eine Messung im Reiter Gewicht.</div>`;
+  else if (!min) res.innerHTML = `<div class="card empty"><div class="ei">⏱️</div><b>Dauer fehlt</b>Wie viele Minuten hast du trainiert?</div>`;
+  else {
+    const kcal = kcalFor(m.met, kg, min);
+    const r = (i) => fi(kcalFor(MET[c.type][i], kg, min));
+    res.innerHTML = `<section class="hero">
+      <div class="hero-top"><div style="min-width:0"><div class="hero-date">${em} ${esc(c.type)} · ${fi(min)} min · ${kgStr(kg)} kg</div><div class="hero-kg">≈ ${fi(kcal)}<small> kcal</small></div></div></div>
+      <div class="hero-stats">
+        <div><b>${NF1.format(m.met)}</b><span>MET · ${m.fromSpeed ? 'aus Tempo' : INT_LBL[c.intensity]}</span></div>
+        <div><b>${NF1.format(kcal / min)}</b><span>kcal pro Minute</span></div>
+      </div>
+      ${m.fromSpeed ? '' : `<p class="hero-range">Locker ${r(0)} · Moderat ${r(1)} · Intensiv ${r(2)} kcal</p>`}
+      <button class="btn light block" data-act="calcToWorkout" style="margin-top:14px">+ Als Workout für heute eintragen</button>
+    </section>`;
+  }
+
+  // Umkehrrechnung
+  const rev = parseNum(($('#calcRev') || {}).value);
+  const out = $('#calcRevOut');
+  if (out) {
+    if (!okKg) out.innerHTML = '';
+    else if (!rev) out.innerHTML = `<p class="small muted">Gib eine Kalorienzahl ein.</p>`;
+    else {
+      const perMin = kcalFor(m.met, kg, 1);
+      const need = Math.ceil(rev / perMin);
+      const alts = ALL_SPORTS.filter((t) => t !== c.type).map((t) => ({ t, n: Math.ceil(rev / kcalFor(MET[t][1], kg, 1)) })).sort((a, b) => a.n - b.n).slice(0, 3);
+      out.innerHTML = `<div class="rev-main"><span>${em}</span><div><b>≈ ${fi(need)} min</b><span class="small muted">${esc(c.type)} · ${m.fromSpeed ? 'bei deinem Tempo' : INT_LBL[c.intensity].toLowerCase()}${need >= 60 ? ` · ${Math.floor(need / 60)} h ${need % 60} min` : ''}</span></div></div>
+        <p class="small muted" style="margin-top:8px">Am schnellsten (moderat): ${alts.map((a) => `${WO_EMOJI[a.t] || ''} ${esc(a.t)} ${fi(a.n)} min`).join(' · ')}</p>`;
+    }
+  }
+
+  // Vergleich
+  const cmp = $('#calcCompare');
+  if (cmp) {
+    const kgC = okKg ? kg : 70;
+    const list = ALL_SPORTS.map((t) => ({ t, v: kcalFor(MET[t][1], kgC, 30) })).sort((a, b) => b.v - a.v);
+    const max = list[0].v;
+    cmp.innerHTML = `<h2>30 Minuten im Vergleich</h2><p class="small muted">${okKg ? `bei ${kgStr(kgC)} kg` : 'Beispiel bei 70 kg'} · moderate Intensität · tippe zum Auswählen</p>
+      <div style="margin-top:6px">${list.map((x) => `<button class="hbar cmp ${x.t === c.type ? 'sel' : ''}" data-act="calcPick" data-t="${x.t}"><span class="lbl">${WO_EMOJI[x.t] || ''} ${esc(x.t)}</span><span class="v">${fi(x.v)} kcal</span><span class="bar"><i style="width:${Math.round((x.v / max) * 100)}%"></i></span></button>`).join('')}</div>`;
+  }
+}
+
 /* ---------- Einstellungen ---------- */
 function renderSettings() {
   const s = data.settings;
@@ -1118,6 +1544,8 @@ function goalEditor(g, i) {
       <label class="field">Richtung<select class="input" data-ch="goalField" data-key="direction" ${D}><option value="min" ${g.direction !== 'max' ? 'selected' : ''}>Mindestens erreichen</option><option value="max" ${g.direction === 'max' ? 'selected' : ''}>Höchstens (nicht überschreiten)</option></select></label>`; break;
     case 'check': fields = `<label class="field">Beschreibung<input class="input" data-ch="goalField" data-key="note" ${D} value="${esc(g.note || '')}" placeholder="optional"></label>`; break;
     case 'photo': fields = `<p class="tiny muted">Erledigt, sobald ein Foto für den Tag gespeichert ist.</p>`; break;
+    case 'weight': fields = `<label class="field">Wiegetag<select class="input" data-ch="goalField" data-key="weekday" ${D}>${WEEKDAYS_LONG.map((w, i) => `<option value="${i}" ${i === (g.weekday ?? 0) ? 'selected' : ''}>${w}</option>`).join('')}</select></label>
+      <p class="tiny muted">Wöchentliches Ziel: zählt nur am Wiegetag zur Tageswertung. Nachtragen bis 6 Tage danach zählt auch.</p>`; break;
   }
   return `<div class="goal-edit ${g.enabled ? '' : 'off'}">
     <div class="goal-edit-head">
@@ -1197,6 +1625,7 @@ function renderWorkoutForm() {
         <label class="field">Dauer<div class="input-unit"><input class="input" name="duration" inputmode="numeric" value="${wf.duration ?? ''}" placeholder="0"><span>min</span></div></label>
         <label class="field">Kalorien<div class="input-unit"><input class="input" name="kcal" inputmode="numeric" value="${wf.kcal ?? ''}" placeholder="0"><span>kcal</span></div></label>
       </div>
+      <button type="button" class="btn sm secondary" data-act="woEstimate" style="align-self:flex-start">🧮 Kalorien schätzen</button>
       <div class="grid2 ${showDist ? '' : 'hidden'}" id="distRow">
         <label class="field">Distanz<div class="input-unit"><input class="input" name="distance" inputmode="decimal" value="${numStr(wf.distance)}" placeholder="0,0"><span>km</span></div></label>
         <label class="field">${DIST[wf.type] === 'speed' ? 'Tempo' : 'Pace'} (automatisch)<input class="input" id="paceOut" readonly value="${paceInfo(wf.type, wf.duration, wf.distance)}" placeholder="–"></label>
@@ -1243,7 +1672,7 @@ const ACT = {
   toggleGoal(d) {
     const g = goalById(d.goal); if (!g) return;
     const day = getDay(d.date);
-    const p = goalProgress(g, day);
+    const p = goalProgress(g, day, d.date);
     if (p.auto && !p.manual) { toast('Schon erreicht – durch deine Einträge ✓'); return; }
     editDay(d.date, (x) => { x.checks[g.id] = !x.checks[g.id]; if (!x.checks[g.id]) delete x.checks[g.id]; });
     const st = dayStats(d.date);
@@ -1292,9 +1721,12 @@ const ACT = {
   trendRange(d) { ui.trendRange = d.r; render(); },
   tip(d, el) {
     const chart = el.closest('.chart'); if (!chart) return;
-    chart.querySelectorAll('.tip').forEach((t) => t.remove());
-    const r = chart.querySelector('svg').getBoundingClientRect();
-    const sx = r.width / 340, sy = r.height / 160;
+    clearTips();
+    const svg = chart.querySelector('svg');
+    const r = svg.getBoundingClientRect(), vb = svg.viewBox.baseVal;
+    const sx = r.width / vb.width, sy = r.height / vb.height;
+    const xh = chart.querySelector('.xhair');
+    if (xh) { xh.setAttribute('x1', d.x); xh.setAttribute('x2', d.x); xh.style.opacity = 1; }
     const t = document.createElement('div');
     t.className = 'tip'; t.textContent = d.tip;
     chart.appendChild(t);
@@ -1302,6 +1734,61 @@ const ACT = {
     const half = t.offsetWidth / 2;
     x = clamp(x, half, chart.clientWidth - half);
     t.style.left = x + 'px'; t.style.top = y + 'px';
+  },
+
+  /* Gewicht */
+  wQuickSave(d, el) {
+    const inp = el.closest('.goal-body, .goal').querySelector('input[data-ch="wQuick"]');
+    if (!inp || !inp.value.trim()) { toast('Bitte ein Gewicht eingeben'); return; }
+    if (saveWeight(d.date, inp.value)) { inp.blur(); render(); }
+  },
+  wStep(d) {
+    const f = $('#weightForm'); if (!f) return;
+    const last = latestWeight();
+    const base = parseNum(f.kg.value) ?? (last ? last.kg : null);
+    if (base === null) { f.kg.focus(); return; }
+    f.kg.value = kgStr(Math.round((base + Number(d.d)) * 10) / 10);
+  },
+  wEdit(d) { ui.wEdit = d.date; render(); const f = $('#weightForm'); if (f) f.scrollIntoView({ behavior: 'smooth', block: 'center' }); },
+  wCancel() { ui.wEdit = null; render(); },
+  wDel(d) {
+    if (!confirm(`Messung vom ${fmtFull(d.date)} löschen?`)) return;
+    delete data.weights[d.date]; ui.wEdit = null; save(); render(); toast('Messung gelöscht');
+  },
+  wRange(d) { ui.wRange = d.r; render(); },
+
+  /* Kalorienrechner */
+  calcMin(d) {
+    data.settings.calc.min = Number(d.v); save();
+    const i = $('#calcMin'); if (i) i.value = d.v;
+    updateCalc();
+  },
+  calcInt(d, el) {
+    data.settings.calc.intensity = d.v; save();
+    el.parentElement.querySelectorAll('button').forEach((b) => b.classList.toggle('on', b === el));
+    updateCalc();
+  },
+  calcPick(d) { data.settings.calc.type = d.t; save(); render(); window.scrollTo({ top: 0, behavior: 'smooth' }); },
+  calcToWorkout() {
+    const c = data.settings.calc;
+    const kg = parseNum(($('#calcKg') || {}).value), min = parseNum(($('#calcMin') || {}).value), dist = parseNum(($('#calcDist') || {}).value);
+    if (!kg || !min) return;
+    const m = metFor(c.type, c.intensity, dist, min);
+    const kind = OUTDOOR.includes(c.type) && !INDOOR.includes(c.type) ? 'outdoor' : 'indoor';
+    openWorkoutForm(todayKey(), kind);
+    Object.assign(wf, { type: c.type, duration: Math.round(min), kcal: Math.round(kcalFor(m.met, kg, min)), distance: DIST[c.type] && dist ? dist : null });
+    renderWorkoutForm();
+  },
+  woEstimate() {
+    readWorkoutForm();
+    if (!wf.type) { toast('Bitte zuerst eine Sportart wählen'); return; }
+    if (!wf.duration) { toast('Bitte zuerst die Dauer eintragen'); return; }
+    const kg = calcKg().kg;
+    if (!kg) { toast('Trag zuerst dein Gewicht im Reiter Gewicht ein'); return; }
+    const m = metFor(wf.type, 'mid', wf.distance, wf.duration);
+    wf.kcal = Math.round(kcalFor(m.met, kg, wf.duration));
+    renderWorkoutForm();
+    toast(`≈ ${fi(wf.kcal)} kcal geschätzt (${m.fromSpeed ? 'aus deinem Tempo' : 'moderat'}, ${kgStr(kg)} kg)`);
   },
 
   /* Bücher */
@@ -1379,7 +1866,7 @@ function currentReadSelect(k) {
 }
 function celebrateIfDone(k, goalId) {
   const g = goalById(goalId); if (!g) return;
-  if (goalProgress(g, getDay(k)).auto && dayStats(k).complete) toast('🎉 Alle Ziele für den Tag erreicht!');
+  if (goalProgress(g, getDay(k), k).auto && dayStats(k).complete) toast('🎉 Alle Ziele für den Tag erreicht!');
 }
 
 /* =========================================================
@@ -1397,6 +1884,17 @@ const CH = {
   },
   readBook(d, v) { editDay(d.date, (x) => { x.reading.bookId = v || null; }); },
   numVal(d, v) { editDay(d.date, (x) => { const n = parseNum(v); if (n === null) delete x.values[d.goal]; else x.values[d.goal] = n; }); },
+  wQuick(d, v) { if (String(v).trim()) saveWeight(d.date, v) && refresh(); },
+  wTarget(d, v) {
+    const n = parseNum(v);
+    if (n !== null && (n < 25 || n > 350)) { toast('Bitte ein gültiges Zielgewicht eingeben'); refresh(); return; }
+    data.settings.weightTarget = n === null ? null : Math.round(n * 10) / 10; save(); refresh();
+  },
+  wHeight(d, v) {
+    const n = parseNum(v);
+    if (n !== null && (n < 100 || n > 250)) { toast('Bitte die Größe in cm eingeben'); refresh(); return; }
+    data.settings.height = n === null ? null : Math.round(n); save(); refresh();
+  },
   cmpA(d, v) { ui.cmpA = v; render(); },
   cmpB(d, v) { ui.cmpB = v; render(); },
   startDate(d, v) { if (!v) return; data.settings.startDate = v; save(); refresh(); },
@@ -1472,15 +1970,19 @@ async function importFile(file) {
 /* =========================================================
    Events
    ========================================================= */
+function clearTips() {
+  document.querySelectorAll('.chart .tip').forEach((x) => x.remove());
+  document.querySelectorAll('.chart .xhair').forEach((x) => { x.style.opacity = 0; });
+}
 document.addEventListener('click', (e) => {
   const t = e.target.closest('[data-act]');
   if (!t) {
-    document.querySelectorAll('.chart .tip').forEach((x) => x.remove());
+    clearTips();
     if (e.target === modal && !modal.classList.contains('viewer')) closeModal();
     return;
   }
   if (t.disabled) return;
-  if (t.dataset.act !== 'tip') document.querySelectorAll('.chart .tip').forEach((x) => x.remove());
+  if (t.dataset.act !== 'tip') clearTips();
   const fn = ACT[t.dataset.act];
   if (fn) { e.preventDefault(); fn(t.dataset, t, e); }
 });
@@ -1490,9 +1992,16 @@ document.addEventListener('change', (e) => {
   if (t && CH[t.dataset.ch]) CH[t.dataset.ch](t.dataset, t.value, t);
   // Workout-Formular: Sportart geändert → Distanzfelder ein-/ausblenden
   if (e.target.closest('#woForm') && e.target.name === 'type') { readWorkoutForm(); renderWorkoutForm(); }
+  // Kalorienrechner
+  if (e.target.id === 'calcType') { data.settings.calc.type = e.target.value; data.settings.calc.dist = null; save(); render(); }
+  else if (e.target.closest('#calcForm, #calcRevBox')) { readCalcInputs(); save(); }
 });
 
 document.addEventListener('input', (e) => {
+  if (e.target.closest('#calcForm, #calcRevBox')) {
+    if (e.target.id === 'calcKg') { data.settings.calc.kgSetAt = Date.now(); }
+    readCalcInputs(); updateCalc();
+  }
   const f = e.target.closest('#woForm');
   if (f && (e.target.name === 'duration' || e.target.name === 'distance')) {
     const out = $('#paceOut');
@@ -1516,6 +2025,19 @@ document.addEventListener('submit', (e) => {
     toast(isNew ? `${WO_EMOJI[w.type] || '💪'} ${w.type} gespeichert` : 'Workout aktualisiert');
     if (isNew) celebrateIfDone(date, 'workouts');
   }
+  if (e.target.id === 'weightForm') {
+    e.preventDefault();
+    const f = e.target;
+    const date = f.date.value || todayKey();
+    if (!f.kg.value.trim()) { toast('Bitte ein Gewicht eingeben'); return; }
+    const old = ui.wEdit;
+    if (saveWeight(date, f.kg.value, f.note.value.trim())) {
+      if (old && old !== date) { delete data.weights[old]; save(); }
+      ui.wEdit = null; render();
+    }
+    return;
+  }
+  if (e.target.id === 'calcForm') { e.preventDefault(); return; }
   if (e.target.id === 'bookForm') {
     e.preventDefault();
     const f = e.target;
