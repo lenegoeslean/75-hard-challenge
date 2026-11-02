@@ -81,16 +81,18 @@ main { max-width: 640px; margin: 0 auto; padding: 6px 16px calc(var(--nav-h) + v
 /* ---------- Tabbar ---------- */
 .tabbar {
   position: fixed; left: 0; right: 0; bottom: 0; z-index: 30;
-  display: grid; grid-template-columns: repeat(6, minmax(0, 1fr));
-  padding: 6px max(6px, env(safe-area-inset-left)) calc(6px + var(--safe-b));
+  display: grid; grid-auto-flow: column; grid-auto-columns: minmax(45px, 1fr); gap: 0;
+  overflow-x: auto; overscroll-behavior-x: contain; scrollbar-width: none; -webkit-overflow-scrolling: touch;
+  padding: 6px max(4px, env(safe-area-inset-left)) calc(6px + var(--safe-b));
   background: color-mix(in srgb, var(--surface) 92%, transparent);
   -webkit-backdrop-filter: saturate(160%) blur(16px);
   backdrop-filter: saturate(160%) blur(16px);
   border-top: 1px solid var(--line);
 }
-.tabbar button { display: flex; flex-direction: column; align-items: center; gap: 3px; padding: 6px 0 4px; border-radius: 14px; color: var(--ink-2); min-height: 52px; }
-.tabbar svg { width: 23px; height: 23px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
-.tabbar span { font-size: clamp(10px, 2.9vw, 11px); max-width: 100%; overflow: hidden; text-overflow: clip; font-weight: 600; letter-spacing: .01em; }
+.tabbar::-webkit-scrollbar { display: none; }
+.tabbar button { display: flex; flex-direction: column; align-items: center; gap: 3px; padding: 6px 0 4px; border-radius: 14px; color: var(--ink-2); min-height: 52px; min-width: 0; }
+.tabbar svg { width: 22px; height: 22px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.tabbar span { font-size: 10.5px; max-width: 100%; white-space: nowrap; font-weight: 600; letter-spacing: -.01em; }
 .tabbar button.active { color: var(--dark); background: var(--soft2); }
 .tabbar button.active svg { stroke-width: 2.2; }
 
@@ -139,7 +141,7 @@ main { max-width: 640px; margin: 0 auto; padding: 6px 16px calc(var(--nav-h) + v
 .goal-body:empty { display: none; }
 
 /* ---------- Formularelemente ---------- */
-label.field { display: flex; flex-direction: column; gap: 5px; font-size: 13.5px; font-weight: 600; color: var(--ink-2); }
+.field { display: flex; flex-direction: column; gap: 5px; font-size: 13.5px; font-weight: 600; color: var(--ink-2); }
 .input, select.input, textarea.input {
   width: 100%; min-height: 46px; padding: 10px 13px; border-radius: var(--radius-sm);
   border: 1.5px solid var(--line); background: var(--surface); color: var(--ink);
@@ -263,7 +265,10 @@ textarea.input { min-height: 80px; resize: vertical; }
 .hbar { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 4px 10px; align-items: center; margin-top: 10px; }
 .hbar .lbl { font-size: 14.5px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .hbar .v { font-size: 13.5px; font-weight: 700; color: var(--ink-2); font-variant-numeric: tabular-nums; text-align: right; }
-.hbar .bar { grid-column: 1 / -1; margin-top: 0; height: 8px; }
+.hbar .bar { grid-column: 1 / -1; margin-top: 0; height: 8px; display: block; }
+.hbar.cmp { width: 100%; text-align: left; margin-top: 2px; padding: 7px 8px; border-radius: 12px; }
+.hbar.cmp.sel { background: var(--soft2); box-shadow: inset 0 0 0 1.5px var(--dark); }
+.hbar.cmp.sel .lbl { font-weight: 800; }
 
 /* ---------- Charts ---------- */
 .chart { position: relative; margin-top: 6px; }
@@ -359,3 +364,36 @@ textarea.input { min-height: 80px; resize: vertical; }
 @media (prefers-reduced-motion: reduce) {
   * { animation: none !important; transition: none !important; }
 }
+
+/* ---------- Gewicht & Rechner ---------- */
+.hero-kg { font-family: var(--serif); font-size: 44px; line-height: 1.05; color: var(--light); margin-top: 4px; font-variant-numeric: tabular-nums; }
+.hero-kg small { font-family: var(--font); font-size: 18px; font-weight: 700; color: #fff; opacity: .9; }
+.hero-stats { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); gap: 8px; margin-top: 14px; position: relative; z-index: 1; }
+.hero-stats > div { background: rgba(255, 255, 255, .11); border-radius: 14px; padding: 9px 10px; min-width: 0; }
+.hero-stats b { display: block; font-size: 16.5px; color: #fff; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.hero-stats span { display: block; font-size: 12px; line-height: 1.3; opacity: .88; margin-top: 1px; }
+.hero-range { position: relative; z-index: 1; margin-top: 10px; font-size: 13.5px; opacity: .92; }
+.btn.light { background: var(--light); color: var(--dark); position: relative; z-index: 1; }
+.pills { display: flex; flex-wrap: wrap; gap: 6px; }
+.pill { min-height: 36px; padding: 6px 12px; border-radius: 99px; background: var(--soft2); color: var(--dark); font-weight: 700; font-size: 14px; }
+.pill.on { background: var(--dark); color: #fff; }
+.pills .pill { flex: 1 1 0; min-width: 0; padding: 6px 4px; white-space: nowrap; }
+.seg.dim { opacity: .6; }
+.field > span:first-child { display: block; }
+.linkbtn { color: var(--dark); font-weight: 700; text-decoration: underline; text-underline-offset: 2px; font-size: inherit; }
+.goal.weekly { background: color-mix(in srgb, var(--surface) 70%, var(--soft2)); }
+.goal-title h3 .kind-tag { vertical-align: 2px; margin-left: 2px; }
+.wrow { display: flex; align-items: center; gap: 12px; padding: 10px 12px; border-radius: 14px; border: 1.5px solid var(--line); text-align: left; width: 100%; background: var(--surface); }
+.wrow.sel { border-color: var(--dark); background: var(--soft2); }
+.wrow .wo-main { flex: 1; min-width: 0; }
+.delta { flex: none; font-size: 13px; font-weight: 700; color: var(--ink-2); background: var(--soft2); padding: 4px 9px; border-radius: 99px; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.delta.good { color: var(--ok); background: #e2f2e9; }
+.chart .line { fill: none; stroke: var(--dark); stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
+.chart .area { fill: var(--light); opacity: .3; }
+.chart .dot { fill: var(--dark); stroke: var(--surface); stroke-width: 2; }
+.chart .xhair { stroke: var(--ink-2); stroke-width: 1; opacity: 0; pointer-events: none; }
+.chart .tlabel { fill: var(--ink-2); font-size: 10.5px; font-weight: 700; font-family: var(--font); }
+.rev-out { margin-top: 12px; }
+.rev-main { display: flex; align-items: center; gap: 12px; }
+.rev-main > span { font-size: 26px; width: 46px; height: 46px; border-radius: 14px; background: var(--soft2); display: grid; place-items: center; flex: none; }
+.rev-main b { display: block; font-family: var(--serif); font-size: 24px; color: var(--dark); line-height: 1.15; }
